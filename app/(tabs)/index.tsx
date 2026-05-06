@@ -1,98 +1,272 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  FlatList,
+  ActivityIndicator,
+  StyleSheet
+} from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import Markdown from 'react-native-markdown-display';
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+export default function Index() {
+  const [mensagens, setMensagens] = useState<any[]>([]);
+  const [pergunta, setPergunta] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [temaEscuro, setTemaEscuro] = useState(true);
 
-export default function HomeScreen() {
+  const flatListRef = useRef<any>(null);
+
+  useEffect(() => {
+    carregarHistorico();
+  }, []);
+
+  const carregarHistorico = async () => {
+    const data = await AsyncStorage.getItem("chat");
+    if (data) setMensagens(JSON.parse(data));
+  };
+
+  const salvarHistorico = async (dados: any[]) => {
+    await AsyncStorage.setItem("chat", JSON.stringify(dados));
+  };
+
+  const scrollFinal = () => {
+    setTimeout(() => {
+      flatListRef.current?.scrollToEnd({ animated: true });
+    }, 100);
+  };
+
+  const animarTexto = (texto: string, callback: any) => {
+    let i = 0;
+    let textoAtual = "";
+
+    const intervalo = setInterval(() => {
+      textoAtual += texto[i];
+      i++;
+
+      callback(textoAtual);
+
+      if (i >= texto.length) {
+        clearInterval(intervalo);
+      }
+    }, 15);
+  };
+
+  const enviarPergunta = async () => {
+    if (!pergunta) return;
+
+    const userMsg = {
+      id: Date.now().toString(),
+      texto: pergunta,
+      tipo: "usuario"
+    };
+
+    const novas = [...mensagens, userMsg];
+    setMensagens(novas);
+    salvarHistorico(novas);
+
+    setPergunta("");
+    setLoading(true);
+
+    scrollFinal();
+
+    try {
+      const res = await fetch("http://10.0.0.245:3000/perguntar", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ pergunta })
+      });
+
+      const data = await res.json();
+
+      let textoIA = "";
+
+      const novaMsgIA = {
+        id: Date.now().toString() + "-ia",
+        texto: "",
+        tipo: "ia"
+      };
+
+      setMensagens(prev => [...prev, novaMsgIA]);
+
+      animarTexto(data.choices[0].message.content, (textoAnimado: string) => {
+        textoIA = textoAnimado;
+
+        setMensagens(prev =>
+          prev.map(msg =>
+            msg.id === novaMsgIA.id
+              ? { ...msg, texto: textoIA }
+              : msg
+          )
+        );
+
+        scrollFinal();
+      });
+
+      salvarHistorico([...novas, { ...novaMsgIA, texto: data.choices[0].message.content }]);
+
+    } catch {
+      setMensagens(prev => [
+        ...prev,
+        {
+          id: Date.now().toString(),
+          texto: "Erro ao conectar",
+          tipo: "ia"
+        }
+      ]);
+    }
+
+    setLoading(false);
+  };
+
+  const limparChat = async () => {
+    await AsyncStorage.removeItem("chat");
+    setMensagens([]);
+  };
+
+  const renderItem = ({ item }: any) => {
+    const isUser = item.tipo === "usuario";
+
+    return (
+      <View style={styles.row}>
+        {!isUser && <Text style={styles.avatar}>🤖</Text>}
+
+        <View style={[
+          styles.bubble,
+          isUser ? styles.userBubble : styles.iaBubble,
+          { backgroundColor: isUser ? "#22c55e" : (temaEscuro ? "#1e293b" : "#e2e8f0") }
+        ]}>
+          <Markdown style={{
+            body: { color: temaEscuro ? "#fff" : "#000" }
+          }}>
+            {item.texto}
+          </Markdown>
+        </View>
+
+        {isUser && <Text style={styles.avatar}>👤</Text>}
+      </View>
+    );
+  };
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+    <View style={[
+      styles.container,
+      { backgroundColor: temaEscuro ? "#020617" : "#f1f5f9" }
+    ]}>
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+      {/* HEADER */}
+      <View style={styles.header}>
+        <Text style={{ color: temaEscuro ? "#fff" : "#000", fontSize: 20 }}>
+          Lumina🤖 Sobre o que você gostaria de conversar?
+        </Text>
+
+        <View style={{ flexDirection: "row", gap: 15 }}>
+          <TouchableOpacity onPress={() => setTemaEscuro(!temaEscuro)}>
+            <Text>🌓</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity onPress={limparChat}>
+            <Text style={{ color: "red" }}>🗑️</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* CHAT */}
+      <FlatList
+        ref={flatListRef}
+        data={mensagens}
+        renderItem={renderItem}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={{ padding: 15 }}
+        onContentSizeChange={scrollFinal}
+      />
+
+      {loading && <ActivityIndicator />}
+
+      {/* INPUT */}
+      <View style={[
+        styles.inputContainer,
+        { backgroundColor: temaEscuro ? "#020617" : "#fff" }
+      ]}>
+        <TextInput
+          value={pergunta}
+          onChangeText={setPergunta}
+          placeholder="Digite..."
+          onSubmitEditing={enviarPergunta}
+          returnKeyType="send"
+          placeholderTextColor="#888"
+          style={[
+            styles.input,
+            {
+              backgroundColor: temaEscuro ? "#0f172a" : "#e2e8f0",
+              color: temaEscuro ? "#fff" : "#000"
+            }
+          ]}
+        />
+
+        <TouchableOpacity style={styles.button} onPress={enviarPergunta}>
+          <Text style={{ color: "#fff" }}>Enviar</Text>
+        </TouchableOpacity>
+      </View>
+
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+  container: { flex: 1 },
+
+  header: {
+    padding: 15,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    borderBottomWidth: 1,
+    borderColor: "#1e293b"
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+
+  row: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    marginVertical: 5
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+
+  avatar: {
+    fontSize: 20,
+    marginHorizontal: 5
   },
+
+  bubble: {
+    padding: 12,
+    borderRadius: 15,
+    maxWidth: "75%"
+  },
+
+  userBubble: {
+    marginLeft: "auto"
+  },
+
+  iaBubble: {},
+
+  inputContainer: {
+    flexDirection: "row",
+    padding: 10
+  },
+
+  input: {
+    flex: 1,
+    padding: 10,
+    borderRadius: 10
+  },
+
+  button: {
+    marginLeft: 10,
+    backgroundColor: "#22c55e",
+    paddingHorizontal: 15,
+    justifyContent: "center",
+    borderRadius: 10
+  }
 });
